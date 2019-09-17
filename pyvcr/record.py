@@ -25,7 +25,7 @@ def record_stream(stream_url, output_file, duration):
                 stream_url,
                 datetime.timedelta(seconds=duration),
             )
-            
+
             response = session.get(stream_url, stream=True)
             response.raise_for_status()
 

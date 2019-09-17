@@ -10,21 +10,24 @@ Options:
   --start, -s               Record start date time.
   --end, -e                 Record end date time.
   --duration, -d            Record duration (in seconds).
-"""
-import logging
+"""  # noqa
 import datetime
+import logging
+import multiprocessing
+import os
 import time
 
 import dateutil.parser
+import dateutil.tz
 import docopt
 
-from pyvcr import record_stream
+from pyvcr import record_stream, load_configuration
 from pyvcr import __version__
 
 LOGGER = logging.getLogger(__name__)
 
 
-def record(stream_url, output_file, start, end, duration):
+def record(stream_url, output_file, start=None, end=None, duration=None):
     """Record `stream_url` in `output_file`.
 
     :param stream_url: `string` URL of the stream.
@@ -37,10 +40,11 @@ def record(stream_url, output_file, start, end, duration):
         'Need to provide either a start/end, or a duration.')
 
     if start and end:
+        assert start.tzinfo == end.tzinfo, (
+            'Start and end must be on the same timezone.')
+
         # Infer duration from start/end time
-        now = datetime.datetime.now()
-        start = dateutil.parser.parse(start)
-        end = dateutil.parser.parse(end)
+        now = datetime.datetime.now(tz=start.tzinfo)
         duration = (end - max(now, start)).total_seconds()
 
         assert end > now, 'The end time can not be in the past.'
@@ -61,13 +65,51 @@ def record(stream_url, output_file, start, end, duration):
     )
 
 
+def _record(args):
+    # TODO: Ugly hack to unpack record arguments
+    record(**args)
+
+
 def watch(configuration_path):
     """Read configuration and start recording when needed.
 
     :param configuration_path: `string` configuration path.
     """
-    pass
-    
+    LOGGER.info('Loading configuration from: %s', configuration_path)
+
+    configuration = load_configuration(configuration_path=configuration_path)
+    timezone = dateutil.tz.gettz(configuration['timezone'])
+    now = datetime.datetime.now(timezone)
+    jobs = []
+
+    for conf_record in configuration['records']:
+        LOGGER.info('Checking %s', conf_record['output'])
+
+        start = dateutil.parser.parse(
+            conf_record['start']).replace(tzinfo=timezone)
+        end = dateutil.parser.parse(
+            conf_record['end']).replace(tzinfo=timezone)
+        output = os.path.join(
+            configuration['output_directory'], conf_record['output'])
+
+        assert end > start, 'Start time must be < end time.'
+
+        if now > start:
+            LOGGER.info(
+                '%s broadcast already started, skipping',
+                conf_record['output'])
+            continue
+
+        jobs.append({
+            'stream_url': conf_record['stream_url'],
+            'output_file': output,
+            'start': start,
+            'end': end,
+        })
+
+    with multiprocessing.Pool(processes=16) as pool:
+        pool.map(_record, jobs)
+
 
 def main():
     args = docopt.docopt(__doc__, version=__version__)

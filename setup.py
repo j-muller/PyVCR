@@ -49,6 +49,7 @@ setup(
         'docopt==0.6.2',
         'requests>=2.22.0,<3.0.0',
         'python-dateutil>=2.8.0,<3.0.0',
+        'pyyaml>=5.1.2,<6.0.0',
     ],
     entry_points={
         'console_scripts': [
